@@ -1,0 +1,105 @@
+diff --git riak.php riak.php
+index 59e4b1c..2383b64 100644
+--- riak.php
++++ riak.php
+@@ -615,6 +615,9 @@ class RiakBucket {
+     $this->r = NULL;
+     $this->w = NULL;
+     $this->dw = NULL;
++    $this->headers = array();
++    $this->keys = NULL;
++    $this->data = NULL;
+   }
+ 
+   /**
+@@ -854,6 +857,83 @@ class RiakBucket {
+ 
+     return $props;
+   }
++
++  function getKeys() {
++    # Do the request...
++    $r = $this->getR();
++    $params = array('r' => $r, 'keys' => 'true', 'props' => 'false');
++    $url = RiakUtils::buildRestPath($this->client, $this, NULL, NULL, $params);
++    $response = RiakUtils::httpRequest('GET', $url);
++
++    $this->populate($response, array(200, 300, 404));
++
++    return $this->data['keys'];
++  }
++
++  /**
++   * Reset this object.
++   * @return $this
++   */
++  private function clear() {
++      $this->headers = array();
++      $this->keys = NULL;
++      $this->data = NULL;
++
++      return $this;
++  }
++
++  /**
++   * Given the output of RiakUtils::httpRequest and a list of
++   * statuses, populate the object. Only for use by the Riak client
++   * library.
++   * @return $this
++   */
++  function populate($response, $expected_statuses) {
++    $this->clear();
++
++    # If no response given, then return.
++    if ($response == NULL) {
++      return $this;
++    }
++
++    # Update the object...
++    $this->headers = $response[0];
++    $this->data = $response[1];
++    $status = $this->status();
++
++    # Check if the server is down (status==0)
++    if ($status == 0) {
++      $m = 'Could not contact Riak Server: http://' . $this->client->host . ':' . $this->client->port . '!';
++      throw new Exception($m);
++    }
++
++    # Verify that we got one of the expected statuses. Otherwise, throw an exception.
++    if (!in_array($status, $expected_statuses)) {
++      $m = 'Expected status ' . implode(' or ', $expected_statuses) . ', received ' . $status;
++      throw new Exception($m);
++    }
++
++    # If 404 (Not Found), then clear the object.
++    if ($status == 404) {
++      $this->clear();
++      return $this;
++    }
++
++    # Possibly json_decode...
++    if ($status == 200) {
++      $this->data = json_decode($this->data, true);
++    }
++
++    return $this;
++  }
++
++  /**
++   * Get the HTTP status from the last operation on this object.
++   * @return integer
++   */
++  function status() {
++    return $this->headers['http_code'];
++  }
+ }
+ 
+ 
+@@ -1465,4 +1545,4 @@ class RiakUtils {
+   }
+ }
+ 
+-?>
+\ No newline at end of file
++?>

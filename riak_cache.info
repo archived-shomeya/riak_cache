@@ -1,0 +1,7 @@
+; $Id$;
+name = Riak Cache
+description = Integration of Riak as cache backend.
+core = 7.x
+dependencies[] = riak_field_storage
+files[] = riak_cache.module
+files[] = riak_cache.inc
