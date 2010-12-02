@@ -29,6 +29,7 @@ class DrupalRiakCache implements DrupalCacheInterface {
       return $this->prepareItem($cache);
     }
     catch (Exception $e) {
+      watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
       // If the database is never going to be available, cache requests should
       // return FALSE in order to allow exception handling to occur.
       return FALSE;
@@ -38,6 +39,7 @@ class DrupalRiakCache implements DrupalCacheInterface {
 
   function getMultiple(&$cids) {
     try {
+      $cache = array();
       // Garbage collection necessary when enforcing a minimum cache lifetime.
       $this->garbageCollection($this->bin);
       $riak = _riak_cache_client();
@@ -55,6 +57,7 @@ class DrupalRiakCache implements DrupalCacheInterface {
       return $cache;
     }
     catch (Exception $e) {
+      watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
       // If the database is never going to be available, cache requests should
       // return FALSE in order to allow exception handling to occur.
       return array();
@@ -76,24 +79,30 @@ class DrupalRiakCache implements DrupalCacheInterface {
       // Reset the variable immediately to prevent a meltdown in heavy load situations.
       variable_set('cache_flush_' . $this->bin, 0);
       // Time to flush old cache data
-      $riak = _riak_cache_client();
-      $bucket = $riak->bucket($this->bin);
+      try {
+        $riak = _riak_cache_client();
+        $bucket = $riak->bucket($this->bin);
 
-      $mapreduce = new RiakCacheMapReduce($riak);
-      $cids = $mapreduce->add($this->bin)->map('function(v) {
-        var r = JSON.parse(v.values[0].data);
-        if (r.expire != '. CACHE_PERMANENT .' && r.expire < '. REQUEST_TIME .') {
-          return [v.key];
-        }
-        else {
-          return [];
-        }
-      }')->run();
+        $mapreduce = new RiakCacheMapReduce($riak);
+        $cids = $mapreduce->add($this->bin)->map('function(v) {
+          var r = JSON.parse(v.values[0].data);
+          if (r.expire != '. CACHE_PERMANENT .' && r.expire < '. REQUEST_TIME .') {
+            return [v.key];
+          }
+          else {
+            return [];
+          }
+        }')->run();
 
-      foreach ($cids as $key) {
-        $object = $bucket->get($key);
-        $object->delete();
+        foreach ($cids as $key) {
+          $object = $bucket->get($key);
+          $object->delete();
+        }
       }
+      catch (Exception $e) {
+        watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
+      }
+
     }
   }
 
@@ -159,6 +168,7 @@ class DrupalRiakCache implements DrupalCacheInterface {
       $object->store();
     }
     catch (Exception $e) {
+      watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
       // The database may not be available, so we'll ignore cache_set requests.
     }
   }
@@ -184,6 +194,33 @@ class DrupalRiakCache implements DrupalCacheInterface {
         elseif (REQUEST_TIME > ($cache_flush + variable_get('cache_lifetime', 0))) {
           // Clear the cache for everyone, cache_lifetime seconds have
           // passed since the first request to clear the cache.
+          try {
+            $mapreduce = new RiakCacheMapReduce($riak);
+            $cids = $mapreduce->add($this->bin)->map('function(v) {
+              var r = JSON.parse(v.values[0].data);
+              if (r.expire != '. CACHE_PERMANENT .' && r.expire < '. REQUEST_TIME .') {
+                return [v.key];
+              }
+              else {
+                return [];
+              }
+            }')->run();
+
+            foreach ($cids as $key) {
+              $object = $bucket->get($key);
+              $object->delete();
+            }
+          }
+          catch (Exception $e) {
+            watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
+          }
+
+          variable_set('cache_flush_' . $this->bin, 0);
+        }
+      }
+      else {
+        // No minimum cache lifetime, flush all temporary cache entries now.
+        try {
           $mapreduce = new RiakCacheMapReduce($riak);
           $cids = $mapreduce->add($this->bin)->map('function(v) {
             var r = JSON.parse(v.values[0].data);
@@ -199,26 +236,9 @@ class DrupalRiakCache implements DrupalCacheInterface {
             $object = $bucket->get($key);
             $object->delete();
           }
-
-          variable_set('cache_flush_' . $this->bin, 0);
         }
-      }
-      else {
-        // No minimum cache lifetime, flush all temporary cache entries now.
-        $mapreduce = new RiakCacheMapReduce($riak);
-        $cids = $mapreduce->add($this->bin)->map('function(v) {
-          var r = JSON.parse(v.values[0].data);
-          if (r.expire != '. CACHE_PERMANENT .' && r.expire < '. REQUEST_TIME .') {
-            return [v.key];
-          }
-          else {
-            return [];
-          }
-        }')->run();
-
-        foreach ($cids as $key) {
-          $object = $bucket->get($key);
-          $object->delete();
+        catch (Exception $e) {
+          watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
         }
       }
     }
@@ -233,7 +253,7 @@ class DrupalRiakCache implements DrupalCacheInterface {
             }
           }
           catch (Exception $e) {
-           
+            watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
           }
         }
         else {
@@ -248,7 +268,7 @@ class DrupalRiakCache implements DrupalCacheInterface {
           }
         }
         catch (Exception $e) {
-
+          watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
         }
 
       }
@@ -258,7 +278,7 @@ class DrupalRiakCache implements DrupalCacheInterface {
           $object->delete();
         }
         catch (Exception $e) {
-
+          watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
         }
       }
     }
@@ -266,10 +286,16 @@ class DrupalRiakCache implements DrupalCacheInterface {
 
   function isEmpty() {
     $this->garbageCollection();
+    $keys = array();
 
-    $riak = _riak_cache_client();
-    $bucket = $riak->bucket($this->bin);
-    $keys = $bucket->getKeys();
+    try {
+      $riak = _riak_cache_client();
+      $bucket = $riak->bucket($this->bin);
+      $keys = $bucket->getKeys();
+    }
+    catch (Exception $e) {
+      watchdog('riak_cache', $e, NULL, WATCHDOG_ERROR);
+    }
 
     return empty($keys);
   }  
