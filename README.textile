@@ -1,0 +1,12 @@
+h1. Drupal Riak cache backend
+
+h2. Installation
+
+# Place this module into sites/all/modules or the respective folder for your site
+# In the module folder, run <code>git clone https://github.com/basho/riak-php-client.git</code>
+# Apply the included patch to the riak-php-client library -- <code>patch -p0 < riak-php-client.patch</code>
+# In settings.php, you can configure the Riak connection -- it defaults to: <pre><code>$conf['riak_connection'] = array('host' => 'localhost', 'port' => '8098');</code></pre>
+# Configure Drupal to use the Riak cache backend by adding the following lines to your settings.php, replacing the path to the riak_cache module as necessary: <pre><code>include_once DRUPAL_ROOT .'/includes/cache.inc';
+include_once DRUPAL_ROOT .'/sites/all/modules/riak_cache/riak_cache.inc';
+$conf['cache_default_class'] = 'DrupalRiakCache';</code></pre>
+
